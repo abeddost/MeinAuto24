@@ -269,7 +269,45 @@ function setupImageUpload() {
         handleFiles(e.target.files);
     });
     
-    function handleFiles(files) {
+    async function compressImage(file, maxWidth = 1920, maxHeight = 1080, quality = 0.85) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    // Calculate new dimensions
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    if (width > maxWidth || height > maxHeight) {
+                        const ratio = Math.min(maxWidth / width, maxHeight / height);
+                        width = Math.floor(width * ratio);
+                        height = Math.floor(height * ratio);
+                    }
+                    
+                    // Create canvas and compress
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Convert to blob
+                    canvas.toBlob((blob) => {
+                        const compressedFile = new File([blob], file.name, {
+                            type: 'image/jpeg',
+                            lastModified: Date.now()
+                        });
+                        resolve(compressedFile);
+                    }, 'image/jpeg', quality);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    async function handleFiles(files) {
         const remainingSlots = 5 - formData.images.length;
         const filesToAdd = Array.from(files).slice(0, remainingSlots);
         
@@ -280,27 +318,42 @@ function setupImageUpload() {
             return;
         }
         
-        filesToAdd.forEach(file => {
+        for (const file of filesToAdd) {
             if (file.type.startsWith('image/')) {
-                // Check file size (5MB limit)
-                if (file.size > 5 * 1024 * 1024) {
-                    alert(`${file.name} ist zu groß. Maximale Dateigröße: 5MB`);
-                    return;
+                try {
+                    // Show processing message
+                    console.log(`📸 Komprimiere ${file.name} (${(file.size / 1024).toFixed(0)} KB)...`);
+                    
+                    // Compress the image
+                    const compressedFile = await compressImage(file);
+                    
+                    const compressionRatio = ((1 - compressedFile.size / file.size) * 100).toFixed(0);
+                    console.log(`✅ ${file.name} komprimiert: ${(file.size / 1024).toFixed(0)} KB → ${(compressedFile.size / 1024).toFixed(0)} KB (${compressionRatio}% kleiner)`);
+                    
+                    // Check compressed file size (now allow up to 2MB after compression)
+                    if (compressedFile.size > 2 * 1024 * 1024) {
+                        alert(`${file.name} ist selbst nach Komprimierung zu groß. Bitte verwenden Sie ein kleineres Bild.`);
+                        continue;
+                    }
+                    
+                    // Read compressed file for preview
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        formData.images.push({
+                            file: compressedFile,
+                            dataUrl: e.target.result
+                        });
+                        updateImagePreview();
+                    };
+                    reader.readAsDataURL(compressedFile);
+                } catch (error) {
+                    console.error('Fehler beim Komprimieren:', error);
+                    alert(`Fehler beim Verarbeiten von ${file.name}`);
                 }
-                
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    formData.images.push({
-                        file: file,
-                        dataUrl: e.target.result
-                    });
-                    updateImagePreview();
-                };
-                reader.readAsDataURL(file);
             } else {
                 alert(`${file.name} ist keine Bilddatei. Nur JPEG, PNG, GIF und WEBP werden unterstützt.`);
             }
-        });
+        }
     }
     
     function updateImagePreview() {

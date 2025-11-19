@@ -7,21 +7,12 @@ const apiKey = process.env.RESEND_API_KEY || 're_a17h6kBb_EwVt1PZvihLL9yikJyPJ5j
 console.log('🔑 Resend API Key geladen:', apiKey ? `${apiKey.substring(0, 10)}...` : 'KEIN API KEY GEFUNDEN!');
 const resend = new Resend(apiKey);
 
-// Helper function to add timeout to promises
-const withTimeout = (promise, timeoutMs = 30000) => {
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Email sending timeout')), timeoutMs)
-        )
-    ]);
-};
-
 // Send confirmation email to customer
 const sendCustomerConfirmation = async (offerData) => {
     try {
         console.log('📧 Starte Versand der Bestätigungs-E-Mail an:', offerData.email);
-        const emailPromise = resend.emails.send({
+        
+        const { data, error } = await resend.emails.send({
             from: 'MeinAutoPreis24 <meinautopreis24@resend.dev>',
             to: offerData.email,
             subject: 'Ihr Angebot wurde erhalten - MeinAutoPreis24',
@@ -64,8 +55,6 @@ const sendCustomerConfirmation = async (offerData) => {
             `
         });
 
-        const { data, error } = await withTimeout(emailPromise, 30000);
-
         if (error) {
             console.error('❌ Fehler beim Senden der Bestätigungs-E-Mail:', JSON.stringify(error, null, 2));
             console.error('❌ Error details:', error);
@@ -95,22 +84,24 @@ const readFileAsBase64 = (filePath) => {
 const sendAdminNotification = async (offerData) => {
     try {
         console.log('📧 Starte Versand der Admin-Benachrichtigung an: hfautohaus@gmail.com');
-        // Prepare attachments from uploaded images
+        
+        // Prepare attachments from uploaded images (now compressed by client)
         const attachments = [];
         if (offerData.images && offerData.images.length > 0) {
             console.log(`📎 Verarbeite ${offerData.images.length} Bild(er) für E-Mail-Anhang...`);
             for (let i = 0; i < offerData.images.length; i++) {
                 const image = offerData.images[i];
-                // Use the path from multer (which is already the full path)
                 const filePath = image.path;
                 
                 console.log(`📷 Verarbeite Bild ${i + 1}: ${filePath}`);
                 
-                // Check if file exists
                 if (fs.existsSync(filePath)) {
+                    const stats = fs.statSync(filePath);
+                    const fileSizeInKB = (stats.size / 1024).toFixed(2);
+                    console.log(`   Größe: ${fileSizeInKB} KB`);
+                    
                     const fileContent = readFileAsBase64(filePath);
                     if (fileContent) {
-                        // Get file extension for filename
                         const ext = path.extname(image.originalname || image.filename).toLowerCase();
                         const filename = image.originalname || `image_${i + 1}${ext}`;
                         
@@ -118,7 +109,7 @@ const sendAdminNotification = async (offerData) => {
                             filename: filename,
                             content: fileContent
                         });
-                        console.log(`✅ Bild ${i + 1} erfolgreich als Anhang hinzugefügt: ${filename}`);
+                        console.log(`✅ Bild ${i + 1} als Anhang hinzugefügt: ${filename} (${fileSizeInKB} KB)`);
                     } else {
                         console.warn(`⚠️ Konnte Bild ${i + 1} nicht lesen: ${filePath}`);
                     }
@@ -130,7 +121,7 @@ const sendAdminNotification = async (offerData) => {
             console.log('ℹ️ Keine Bilder zum Anhängen vorhanden');
         }
 
-        const emailPromise = resend.emails.send({
+        const { data, error } = await resend.emails.send({
             from: 'MeinAutoPreis24 <meinautopreis24@resend.dev>',
             to: 'hfautohaus@gmail.com',
             subject: `🚗 Neues Angebot: ${offerData.brand} ${offerData.model}`,
@@ -168,8 +159,6 @@ const sendAdminNotification = async (offerData) => {
             `,
             attachments: attachments.length > 0 ? attachments : undefined
         });
-
-        const { data, error } = await withTimeout(emailPromise, 60000); // 60s timeout for emails with attachments
 
         if (error) {
             console.error('❌ Fehler beim Senden der Admin-Benachrichtigung:', JSON.stringify(error, null, 2));
