@@ -1,21 +1,28 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
+const fs = require('fs');
+const path = require('path');
 
-// Create transporter (configure with your email service)
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: process.env.SMTP_PORT || 587,
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    }
-});
+// Initialize Resend with API key
+const apiKey = process.env.RESEND_API_KEY || 're_a17h6kBb_EwVt1PZvihLL9yikJyPJ5j9a';
+console.log('🔑 Resend API Key geladen:', apiKey ? `${apiKey.substring(0, 10)}...` : 'KEIN API KEY GEFUNDEN!');
+const resend = new Resend(apiKey);
+
+// Helper function to add timeout to promises
+const withTimeout = (promise, timeoutMs = 30000) => {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Email sending timeout')), timeoutMs)
+        )
+    ]);
+};
 
 // Send confirmation email to customer
 const sendCustomerConfirmation = async (offerData) => {
     try {
-        const mailOptions = {
-            from: `"MeinAutoPreis24" <${process.env.SMTP_USER}>`,
+        console.log('📧 Starte Versand der Bestätigungs-E-Mail an:', offerData.email);
+        const emailPromise = resend.emails.send({
+            from: 'MeinAutoPreis24 <meinautopreis24@resend.dev>',
             to: offerData.email,
             subject: 'Ihr Angebot wurde erhalten - MeinAutoPreis24',
             html: `
@@ -55,21 +62,77 @@ const sendCustomerConfirmation = async (offerData) => {
                     </div>
                 </div>
             `
-        };
+        });
 
-        await transporter.sendMail(mailOptions);
-        console.log('✅ Bestätigungs-E-Mail gesendet an:', offerData.email);
+        const { data, error } = await withTimeout(emailPromise, 30000);
+
+        if (error) {
+            console.error('❌ Fehler beim Senden der Bestätigungs-E-Mail:', JSON.stringify(error, null, 2));
+            console.error('❌ Error details:', error);
+            return;
+        }
+
+        console.log('✅ Bestätigungs-E-Mail erfolgreich gesendet an:', offerData.email);
+        console.log('✅ Resend Response:', data);
     } catch (error) {
-        console.error('❌ Fehler beim Senden der Bestätigungs-E-Mail:', error.message);
+        console.error('❌ Exception beim Senden der Bestätigungs-E-Mail:', error);
+        console.error('❌ Error stack:', error.stack);
+    }
+};
+
+// Helper function to read file and convert to base64
+const readFileAsBase64 = (filePath) => {
+    try {
+        const fileBuffer = fs.readFileSync(filePath);
+        return fileBuffer.toString('base64');
+    } catch (error) {
+        console.error(`❌ Fehler beim Lesen der Datei ${filePath}:`, error.message);
+        return null;
     }
 };
 
 // Send notification email to admin
 const sendAdminNotification = async (offerData) => {
     try {
-        const mailOptions = {
-            from: `"MeinAutoPreis24" <${process.env.SMTP_USER}>`,
-            to: process.env.ADMIN_EMAIL || process.env.SMTP_USER,
+        console.log('📧 Starte Versand der Admin-Benachrichtigung an: hfautohaus@gmail.com');
+        // Prepare attachments from uploaded images
+        const attachments = [];
+        if (offerData.images && offerData.images.length > 0) {
+            console.log(`📎 Verarbeite ${offerData.images.length} Bild(er) für E-Mail-Anhang...`);
+            for (let i = 0; i < offerData.images.length; i++) {
+                const image = offerData.images[i];
+                // Use the path from multer (which is already the full path)
+                const filePath = image.path;
+                
+                console.log(`📷 Verarbeite Bild ${i + 1}: ${filePath}`);
+                
+                // Check if file exists
+                if (fs.existsSync(filePath)) {
+                    const fileContent = readFileAsBase64(filePath);
+                    if (fileContent) {
+                        // Get file extension for filename
+                        const ext = path.extname(image.originalname || image.filename).toLowerCase();
+                        const filename = image.originalname || `image_${i + 1}${ext}`;
+                        
+                        attachments.push({
+                            filename: filename,
+                            content: fileContent
+                        });
+                        console.log(`✅ Bild ${i + 1} erfolgreich als Anhang hinzugefügt: ${filename}`);
+                    } else {
+                        console.warn(`⚠️ Konnte Bild ${i + 1} nicht lesen: ${filePath}`);
+                    }
+                } else {
+                    console.warn(`⚠️ Datei nicht gefunden: ${filePath}`);
+                }
+            }
+        } else {
+            console.log('ℹ️ Keine Bilder zum Anhängen vorhanden');
+        }
+
+        const emailPromise = resend.emails.send({
+            from: 'MeinAutoPreis24 <meinautopreis24@resend.dev>',
+            to: 'hfautohaus@gmail.com',
             subject: `🚗 Neues Angebot: ${offerData.brand} ${offerData.model}`,
             html: `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -99,16 +162,26 @@ const sendAdminNotification = async (offerData) => {
                         <li style="padding: 5px 0;"><strong style="color: #f97316;">Wunschpreis:</strong> <strong style="color: #f97316;">${offerData.desiredPrice.toFixed(2)} €</strong></li>
                     </ul>
                     
-                    <p><strong>Anzahl Bilder:</strong> ${offerData.images.length}</p>
+                    <p><strong>Anzahl Bilder:</strong> ${offerData.images.length} ${attachments.length > 0 ? '(als Anhang beigefügt)' : ''}</p>
                     <p><strong>Eingegangen am:</strong> ${new Date(offerData.submittedAt).toLocaleString('de-DE')}</p>
                 </div>
-            `
-        };
+            `,
+            attachments: attachments.length > 0 ? attachments : undefined
+        });
 
-        await transporter.sendMail(mailOptions);
-        console.log('✅ Admin-Benachrichtigung gesendet');
+        const { data, error } = await withTimeout(emailPromise, 60000); // 60s timeout for emails with attachments
+
+        if (error) {
+            console.error('❌ Fehler beim Senden der Admin-Benachrichtigung:', JSON.stringify(error, null, 2));
+            console.error('❌ Error details:', error);
+            return;
+        }
+
+        console.log(`✅ Admin-Benachrichtigung erfolgreich gesendet mit ${attachments.length} Bild(ern) als Anhang`);
+        console.log('✅ Resend Response:', data);
     } catch (error) {
-        console.error('❌ Fehler beim Senden der Admin-Benachrichtigung:', error.message);
+        console.error('❌ Exception beim Senden der Admin-Benachrichtigung:', error);
+        console.error('❌ Error stack:', error.stack);
     }
 };
 

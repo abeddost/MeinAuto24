@@ -42,8 +42,12 @@ const submitOffer = async (req, res) => {
             postalCode: req.body.postalCode,
             desiredPrice: parseFloat(req.body.desiredPrice),
             
-            // Images
-            images: req.files ? req.files.map(file => file.filename) : [],
+            // Images - include full file paths for email attachments
+            images: req.files ? req.files.map(file => ({
+                filename: file.filename,
+                path: file.path,
+                originalname: file.originalname
+            })) : [],
             
             // Timestamp
             submittedAt: new Date().toISOString()
@@ -56,17 +60,32 @@ const submitOffer = async (req, res) => {
             price: `${offerData.desiredPrice} €`
         });
 
-        // Send confirmation email to customer
-        await emailService.sendCustomerConfirmation(offerData);
-
-        // Send notification email to admin
-        await emailService.sendAdminNotification(offerData);
-
-        // Return success response
+        // Return success response immediately (don't wait for emails)
         res.json({
             success: true,
             message: 'Vielen Dank! Ihr Angebot wurde erfolgreich übermittelt. Wir werden uns in Kürze bei Ihnen melden.',
             offerId: Date.now().toString()
+        });
+
+        // Send emails asynchronously (don't block the response)
+        // Use setImmediate to ensure response is sent first
+        setImmediate(async () => {
+            console.log('📬 Starte E-Mail-Versand im Hintergrund...');
+            try {
+                // Send confirmation email to customer
+                console.log('📧 Versende Bestätigungs-E-Mail...');
+                await emailService.sendCustomerConfirmation(offerData);
+                
+                // Send notification email to admin
+                console.log('📧 Versende Admin-Benachrichtigung...');
+                await emailService.sendAdminNotification(offerData);
+                
+                console.log('✅ Alle E-Mails erfolgreich verarbeitet');
+            } catch (emailError) {
+                console.error('❌ Fehler beim Senden der E-Mails (nicht kritisch):', emailError);
+                console.error('❌ Error stack:', emailError.stack);
+                // Don't throw - emails are sent in background, user already got success response
+            }
         });
 
     } catch (error) {
