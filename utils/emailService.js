@@ -3,8 +3,12 @@ const fs = require('fs');
 const path = require('path');
 
 // Initialize Resend with API key
-const apiKey = process.env.RESEND_API_KEY || 're_a17h6kBb_EwVt1PZvihLL9yikJyPJ5j9a';
-console.log('🔑 Resend API Key geladen:', apiKey ? `${apiKey.substring(0, 10)}...` : 'KEIN API KEY GEFUNDEN!');
+const apiKey = process.env.RESEND_API_KEY;
+if (!apiKey) {
+    console.error('❌ KRITISCHER FEHLER: RESEND_API_KEY ist nicht gesetzt!');
+    throw new Error('RESEND_API_KEY environment variable is required. Please set it in your .env file.');
+}
+console.log('🔑 Resend API Key geladen:', `${apiKey.substring(0, 10)}...`);
 const resend = new Resend(apiKey);
 
 // Send confirmation email to customer
