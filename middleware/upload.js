@@ -3,8 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '../uploads');
+// Use /tmp on Vercel (ephemeral) or uploads/ locally
+// Vercel provides /tmp directory that persists during function execution
+const uploadsDir = process.env.VERCEL 
+    ? '/tmp/uploads' 
+    : path.join(__dirname, '../uploads');
+
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }

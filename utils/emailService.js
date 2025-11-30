@@ -1,3 +1,6 @@
+// Load environment variables first
+require('dotenv').config();
+
 const { Resend } = require('resend');
 const fs = require('fs');
 const path = require('path');
